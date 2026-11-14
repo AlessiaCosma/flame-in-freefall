@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flame in Freefall · NASA PSI Fire Safety Explorer</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root {
+    --bg: #0b1020; --panel: #121a2f; --panel-2: #18223c; --border: #26324f;
+    --text: #e6ebf5; --muted: #8d9abb; --accent: #ff7a3d; --accent-2: #4fb3ff;
+    --ok: #3ecf8e; --warn: #ffc857; --bad: #ff5d6c; --moon: rgba(255, 200, 87, 0.12);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { overflow-x: hidden; margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  a { color: var(--accent-2); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 28px; border-bottom: 1px solid var(--border);
+           background: linear-gradient(90deg, #0b1020, #151d36); position: sticky; top: 0; z-index: 10; }
+  .logo { font-size: 26px; }
+  .title h1 { margin: 0; font-size: 19px; letter-spacing: .3px; }
+  .title p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .api { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .api input { width: 210px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  nav { display: flex; gap: 4px; padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  nav button { background: none; border: none; color: var(--muted); padding: 13px 16px; font-size: 14px; cursor: pointer;
+               border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 24px 28px 48px; max-width: 1400px; margin: 0 auto; }
+  section { display: none; }
+  section.active { display: block; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  .lead { color: var(--muted); font-size: 13px; margin: 0 0 18px; max-width: 900px; line-height: 1.5; }
+  .grid { display: grid; gap: 16px; }
+  .kpis { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 16px; }
+  .two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .card { min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .kpi .v { font-size: 30px; font-weight: 700; }
+  .kpi .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .kpi .s { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .kpi.moon .v { color: var(--warn); }
+  .plot { width: 100%; height: 340px; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; margin-bottom: 14px; }
+  label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 5px; }
+  input, select { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 8px 10px; font-size: 13px; }
+  input[type=checkbox] { width: auto; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
+  .btn { background: var(--accent); color: #1a0d05; border: none; border-radius: 8px; padding: 9px 16px; font-weight: 600;
+         cursor: pointer; font-size: 13px; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { position: sticky; top: 0; background: var(--panel-2); text-align: left; padding: 9px 10px; color: var(--muted);
+       font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--panel-2); }
+  .na { color: #56627f; font-style: italic; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--panel-2);
+          border: 1px solid var(--border); white-space: nowrap; }
+  .pill.Prevention { border-color: #ff7a3d; color: #ffb38f; }
+  .pill.Detection { border-color: #4fb3ff; color: #9fd4ff; }
+  .pill.Suppression { border-color: #3ecf8e; color: #8fe8c0; }
+  .pill.Fundamental { border-color: #b48cff; color: #d6c2ff; }
+  .count { color: var(--muted); font-size: 12px; margin: 8px 0; }
+  .sim { grid-template-columns: 340px minmax(0, 1fr); }
+  @media (max-width: 900px) { .sim { grid-template-columns: 1fr; } }
+  .field { margin-bottom: 14px; }
+  .field .row { display: flex; justify-content: space-between; }
+  .field .val { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .presets button { font-size: 12px; padding: 6px 10px; }
+  .level { font-size: 20px; font-weight: 700; margin: 4px 0 2px; }
+  .level.HIGH { color: var(--bad); } .level.ELEVATED { color: var(--warn); } .level.LOW { color: var(--ok); }
+  .level.UNKNOWN { color: var(--muted); }
+  ul.list { margin: 6px 0 0; padding-left: 18px; line-height: 1.55; font-size: 13px; }
+  .warnbox { background: rgba(255, 200, 87, .08); border: 1px solid rgba(255, 200, 87, .35); border-radius: 10px; padding: 12px 14px; }
+  .warnbox h3, .okbox h3 { margin: 0; font-size: 13px; }
+  .okbox { background: rgba(62, 207, 142, .07); border: 1px solid rgba(62, 207, 142, .3); border-radius: 10px; padding: 12px 14px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .drawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(460px, 100%); background: var(--panel); border-left: 1px solid var(--border);
+            transform: translateX(100%); visibility: hidden; transition: transform .2s, visibility .2s; z-index: 20; padding: 20px; overflow: auto; }
+  .drawer.open { transform: none; visibility: visible; }
+  .drawer dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 10px; font-size: 12.5px; }
+  .drawer dt { color: var(--muted); }
+  .drawer dd { margin: 0; word-break: break-word; }
+  .error { background: rgba(255, 93, 108, .1); border: 1px solid rgba(255, 93, 108, .4); color: #ffb3bb; padding: 12px 14px;
+           border-radius: 10px; margin-bottom: 16px; display: none; font-size: 13px; }
+  footer { color: var(--muted); font-size: 11px; text-align: center; padding: 20px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🔥</div>
+  <div class="title">
+    <h1>Flame in Freefall</h1>
+    <p>Fire-safety insights from NASA microgravity combustion experiments (PSI)</p>
+  </div>
+  <div class="api">
+    <span class="dot" id="apiDot"></span>
+    <span id="apiText">API offline</span>
+    <input id="apiBase" title="Backend URL">
+    <button class="btn ghost" id="apiConnect">Connect</button>
+  </div>
+</header>
+
+<nav>
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="explorer">Explorer</button>
+  <button data-tab="map">Condition map</button>
+  <button data-tab="whatif">What-if</button>
+</nav>
+
+<main>
+  <div class="error" id="error"></div>
+
+  <!-- OVERVIEW -->
+  <section id="overview" class="active">
+    <h2>What NASA has tested</h2>
+    <p class="lead">Every number below comes from NASA's Physical Sciences Informatics (PSI) tables. Values that NASA did not
+      report are shown as missing, never estimated.</p>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="l">Experiments</div><div class="v" id="kTotal">–</div><div class="s" id="kInv"></div></div>
+      <div class="card kpi moon"><div class="l">Moon-base relevant</div><div class="v" id="kMoon">–</div><div class="s">ambient O₂ ≥ 30%</div></div>
+      <div class="card kpi"><div class="l">O₂ range tested</div><div class="v" id="kO2">–</div><div class="s">Earth air = 21%</div></div>
+      <div class="card kpi"><div class="l">O₂ reported</div><div class="v" id="kComp">–</div><div class="s">share of tests with an O₂ value</div></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><div id="pPillar" class="plot"></div></div>
+      <div class="card"><div id="pInv" class="plot"></div></div>
+      <div class="card"><div id="pOutcome" class="plot"></div></div>
+      <div class="card"><div id="pMaterial" class="plot"></div></div>
+    </div>
+  </section>
+
+  <!-- EXPLORER -->
+  <section id="explorer">
+    <h2>Explore the experiments</h2>
+    <p class="lead">Filter by investigation, pillar or conditions. Click a row to see every field and the DOI to cite.</p>
+    <div class="card">
+      <div class="filters">
+        <div><label>Investigation</label><select id="fInv"></select></div>
+        <div><label>Pillar</label><select id="fPillar"></select></div>
+        <div><label>Material / fuel</label><select id="fMat"></select></div>
+        <div><label>Outcome</label><select id="fOut"></select></div>
+        <div><label>Min O₂ %</label><input id="fO2min" type="number" value="0" min="0" max="100"></div>
+        <div><label>Max O₂ %</label><input id="fO2max" type="number" value="100" min="0" max="100"></div>
+        <div><label><input type="checkbox" id="fUnknown" checked> Include unreported values</label></div>
+        <div style="display:flex; gap:8px"><button class="btn" id="fApply">Apply</button><button class="btn ghost" id="fReset">Reset</button></div>
+      </div>
+    </div>
+    <div class="count" id="tCount"></div>
+    <div class="table-wrap"><table><thead><tr>
+      <th>ID</th><th>Investigation</th><th>Pillar</th><th>Material</th><th>O₂ %</th><th>Pressure kPa</th>
+      <th>Airflow cm/s</th><th>Diluent</th><th>Outcome</th>
+    </tr></thead><tbody id="tBody"></tbody></table></div>
+  </section>
+
+  <!-- CONDITION MAP -->
+  <section id="map">
+    <h2>Where the data is – and where it is missing</h2>
+    <p class="lead">Each dot is a NASA test. The shaded band is the planned Moon-base atmosphere (≥ 30% O₂ at ≈ 70 kPa / 10.2 psi):
+      the fewer dots inside it, the bigger the knowledge gap for lunar fire safety.</p>
+    <div class="filters" style="max-width:520px">
+      <div><label>Colour by</label><select id="mColor">
+        <option value="pillar">Pillar</option><option value="investigation">Investigation</option><option value="outcome">Outcome</option>
+      </select></div>
+      <div><label><input type="checkbox" id="mAmbient" checked> Ambient O₂ only</label></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><div id="pO2Flow" class="plot" style="height:430px"></div></div>
+      <div class="card"><div id="pO2Press" class="plot" style="height:430px"></div></div>
+    </div>
+  </section>
+
+  <!-- WHAT-IF -->
+  <section id="whatif">
+    <h2>What-if: how did similar NASA tests behave?</h2>
+    <p class="lead">Describe a habitat scenario. The tool finds the most similar NASA tests and reports in how many of them a flame
+      established itself. It is a data summary, not a validated physical model – its limitations are always shown.</p>
+    <div class="grid sim">
+      <div class="card">
+        <label>Quick scenarios</label>
+        <div class="presets">
+          <button class="btn ghost" data-preset="iss">ISS cabin</button>
+          <button class="btn ghost" data-preset="moon">Moon base</button>
+          <button class="btn ghost" data-preset="suit">Low-flow corner</button>
+        </div>
+        <div class="field"><label>Environment</label><select id="sEnv">
+          <option>ISS (Microgravity 0g)</option><option>Lunar Habitat (0.16g)</option>
+          <option>Martian Habitat (0.38g)</option><option>Deep Space Transit</option></select></div>
+        <div class="field"><label>Material / fuel</label><select id="sMat"></select></div>
+        <div class="field"><div class="row"><label>Oxygen</label><span class="val" id="vO2"></span></div>
+          <input type="range" id="sO2" min="10" max="60" step="0.5" value="21"></div>
+        <div class="field"><div class="row"><label>Cabin pressure</label><span class="val" id="vP"></span></div>
+          <input type="range" id="sP" min="30" max="150" step="0.5" value="101.3"></div>
+        <div class="field"><div class="row"><label>Ventilation airflow</label><span class="val" id="vF"></span></div>
+          <input type="range" id="sF" min="0" max="50" step="0.5" value="5"></div>
+        <div class="field"><div class="row"><label>Similar tests to use</label><span class="val" id="vK"></span></div>
+          <input type="range" id="sK" min="3" max="15" step="1" value="6"></div>
+        <button class="btn" id="sRun" style="width:100%">Analyse scenario</button>
+      </div>
+      <div class="grid" style="align-content:start">
+        <div class="grid two">
+          <div class="card"><div id="pGauge" style="height:230px"></div></div>
+          <div class="card">
+            <label>Assessment</label>
+            <div class="level" id="sLevel">–</div>
+            <div class="muted" id="sMethod"></div>
+            <div style="margin-top:12px"><label>Cool-flame re-ignition</label><div id="sCool" style="font-size:13px">–</div></div>
+            <div style="margin-top:12px"><label>CO in similar tests</label><div id="sCO" style="font-size:13px">–</div></div>
+          </div>
+        </div>
+        <div class="warnbox" id="sLimBox"><h3>⚠ Limitations</h3><ul class="list" id="sLim"></ul></div>
+        <div class="okbox"><h3>What the NASA data shows</h3><ul class="list" id="sRecs"></ul></div>
+        <div class="card">
+          <label>Most similar NASA tests</label>
+          <div class="table-wrap" style="max-height:320px"><table><thead><tr>
+            <th>ID</th><th>Investigation</th><th>Material</th><th>O₂ %</th><th>kPa</th><th>cm/s</th><th>Outcome</th><th>Similarity</th>
+          </tr></thead><tbody id="sBody"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer">
+  <div style="display:flex; justify-content:space-between; align-items:center">
+    <h2 id="dTitle">Experiment</h2><button class="btn ghost" id="dClose">✕</button>
+  </div>
+  <dl id="dList"></dl>
+</aside>
+
+<footer>Data: NASA Physical Sciences Informatics (psi.nasa.gov), CC0 – cite each investigation's DOI · NASA Space Apps Challenge 2026</footer>
+
+<script>
+const PLOT_LAYOUT = {
+  paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+  font: { color: "#e6ebf5", family: "Segoe UI, system-ui, sans-serif", size: 12 },
+  margin: { l: 50, r: 20, t: 44, b: 44 },
+  xaxis: { gridcolor: "#26324f", zerolinecolor: "#26324f" },
+  yaxis: { gridcolor: "#26324f", zerolinecolor: "#26324f" },
+  legend: { orientation: "h", y: -0.18 },
+};
+const PLOT_CONFIG = { displaylogo: false, responsive: true };
+const PILLAR_COLORS = { Prevention: "#ff7a3d", Detection: "#4fb3ff", Suppression: "#3ecf8e", Fundamental: "#b48cff" };
+const MOON = { o2: 30, kpa: 70.3 };
+const ISS = { o2: 21, kpa: 101.3 };
+
+const $ = (id) => document.getElementById(id);
+let API = "";
+let allExperiments = [];
+
+// ---------- helpers ----------
+function storeGet(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
+function storeSet(key, value) { try { localStorage.setItem(key, value); } catch { /* storage unavailable */ } }
+
+function esc(v) {
+  return String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function cell(v, digits) {
+  if (v === null || v === undefined || v === "" || Number.isNaN(v)) return '<span class="na">n/r</span>';
+  if (typeof v === "number" && digits !== undefined) return v.toFixed(digits);
+  return esc(v);
+}
+function pillarKey(p) { return (p || "").split(" ")[0]; }
+function pill(p) { return p ? `<span class="pill ${esc(pillarKey(p))}">${esc(p)}</span>` : cell(null); }
+function o2Of(e) {
+  if (e.o2_pct !== null) return e.o2_pct;
+  if (e.o2_min_pct !== null && e.o2_max_pct !== null) return (e.o2_min_pct + e.o2_max_pct) / 2;
+  return null;
+}
+function showError(msg) { const el = $("error"); el.textContent = msg; el.style.display = msg ? "block" : "none"; }
+
+async function api(path, params = {}) {
+  const url = new URL(API.replace(/\/$/, "") + path);
+  Object.entries(params).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) url.searchParams.set(k, v); });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  return res.json();
+}
+function fillSelect(id, values, allLabel = "All") {
+  $(id).innerHTML = (allLabel ? `<option value="">${allLabel}</option>` : "") +
+    values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+}
+function barH(div, obj, title, colorFn) {
+  const entries = Object.entries(obj).sort((a, b) => a[1] - b[1]);
+  Plotly.newPlot(div, [{
+    type: "bar", orientation: "h", x: entries.map((e) => e[1]), y: entries.map((e) => e[0]),
+    marker: { color: entries.map((e) => (colorFn ? colorFn(e[0]) : "#4fb3ff")) },
+    hovertemplate: "%{y}: %{x}<extra></extra>",
+  }], { ...PLOT_LAYOUT, title: { text: title, font: { size: 14 } }, yaxis: { ...PLOT_LAYOUT.yaxis, automargin: true }, margin: { ...PLOT_LAYOUT.margin, l: 20 } }, PLOT_CONFIG);
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll("section").forEach((s) => s.classList.toggle("active", s.id === b.dataset.tab));
+  document.querySelectorAll(`#${b.dataset.tab} .js-plotly-plot`).forEach((p) => Plotly.Plots.resize(p));
+}));
+
+// ---------- overview ----------
+async function loadOverview() {
+  const s = await api("/summary");
+  $("kTotal").textContent = s.total_experiments.toLocaleString();
+  $("kInv").textContent = `${Object.keys(s.by_investigation).length} investigations`;
+  $("kMoon").textContent = s.moon_base_relevant_tests;
+  $("kO2").textContent = s.o2_range.min !== null ? `${s.o2_range.min}–${s.o2_range.max}%` : "–";
+  $("kComp").textContent = `${s.data_completeness_pct.o2_pct}%`;
+  barH("pPillar", s.by_pillar, "Tests per fire-safety pillar", (k) => PILLAR_COLORS[pillarKey(k)] || "#8d9abb");
+  barH("pInv", s.by_investigation, "Tests per investigation");
+  barH("pOutcome", s.by_outcome, "Reported outcomes", (k) => (k === "Not reported" ? "#56627f" : "#ff7a3d"));
+  barH("pMaterial", s.by_material, "Most-tested materials / fuels", () => "#3ecf8e");
+}
+
+// ---------- explorer ----------
+async function loadFilters() {
+  const f = await api("/filters");
+  fillSelect("fInv", f.investigations);
+  fillSelect("fPillar", f.pillars);
+  fillSelect("fMat", f.materials);
+  fillSelect("fOut", f.outcomes);
+  fillSelect("sMat", f.materials, null);
+  const pmma = f.materials.find((m) => m.startsWith("PMMA (")) || f.materials.find((m) => m.startsWith("PMMA"));
+  if (pmma) $("sMat").value = pmma;
+}
+
+async function loadTable() {
+  const params = {
+    investigation: $("fInv").value, pillar: $("fPillar").value, material: $("fMat").value, outcome: $("fOut").value,
+    min_o2: $("fO2min").value, max_o2: $("fO2max").value, include_unknown: $("fUnknown").checked, limit: 1000,
+  };
+  const r = await api("/experiments", params);
+  $("tCount").textContent = `${r.total_matched} matching tests` + (r.returned < r.total_matched ? ` (showing first ${r.returned})` : "");
+  $("tBody").innerHTML = r.experiments.map((e, i) => `<tr data-i="${i}">
+    <td>${cell(e.exp_id)}</td><td>${cell(e.investigation)}</td><td>${pill(e.pillar)}</td><td>${cell(e.material)}</td>
+    <td>${e.o2_pct !== null ? cell(e.o2_pct, 1) : (e.o2_max_pct !== null ? `${e.o2_min_pct}–${e.o2_max_pct}` : cell(null))}</td>
+    <td>${cell(e.pressure_kpa, 1)}</td><td>${cell(e.airflow_cm_s, 1)}</td><td>${cell(e.diluent)}</td><td>${cell(e.outcome)}</td>
+  </tr>`).join("");
+  $("tBody").querySelectorAll("tr").forEach((tr) => tr.addEventListener("click", () => openDrawer(r.experiments[tr.dataset.i])));
+}
+
+function openDrawer(e) {
+  $("dTitle").textContent = e.exp_id;
+  $("dList").innerHTML = Object.entries(e).map(([k, v]) => {
+    const val = k === "doi" && v ? `<a href="https://doi.org/${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : cell(v);
+    return `<dt>${esc(k)}</dt><dd>${val}</dd>`;
+  }).join("");
+  $("drawer").classList.add("open");
+}
+$("dClose").addEventListener("click", () => $("drawer").classList.remove("open"));
+$("fApply").addEventListener("click", () => loadTable().catch((err) => showError(err.message)));
+$("fReset").addEventListener("click", () => {
+  ["fInv", "fPillar", "fMat", "fOut"].forEach((id) => ($(id).value = ""));
+  $("fO2min").value = 0; $("fO2max").value = 100; $("fUnknown").checked = true;
+  loadTable().catch((err) => showError(err.message));
+});
+
+// ---------- condition map ----------
+async function loadMapData() {
+  const r = await api("/experiments", { limit: 5000 });
+  allExperiments = r.experiments;
+  drawMaps();
+}
+
+function drawMaps() {
+  const by = $("mColor").value;
+  const ambientOnly = $("mAmbient").checked;
+  const rows = allExperiments.filter((e) => o2Of(e) !== null && (!ambientOnly || (e.o2_context || "").startsWith("ambient")));
+  const groups = {};
+  rows.forEach((e) => { const k = e[by] || "Not reported"; (groups[k] = groups[k] || []).push(e); });
+  const hover = (e) => `<b>${e.exp_id}</b><br>${e.investigation} · ${e.material}<br>O₂ ${o2Of(e)?.toFixed(1)}% · ` +
+    `${e.pressure_kpa ?? "n/r"} kPa · ${e.airflow_cm_s ?? "n/r"} cm/s<br>${e.outcome}`;
+  const trace = (k, list, yKey) => ({
+    type: "scattergl", mode: "markers", name: k,
+    x: list.map(o2Of), y: list.map((e) => e[yKey]),
+    text: list.map(hover), hovertemplate: "%{text}<extra></extra>",
+    marker: { size: 7, opacity: 0.75, color: by === "pillar" ? PILLAR_COLORS[pillarKey(k)] : undefined },
+  });
+  const moonBand = (yMax) => ({ type: "rect", x0: MOON.o2, x1: 100, y0: 0, y1: yMax, fillcolor: "rgba(255,200,87,0.13)",
+                                line: { width: 0 }, layer: "below" });
+  const moonLabel = { x: MOON.o2 + 1, xanchor: "left", yref: "paper", y: 1.02, text: "Moon base O₂ ≥ 30%",
+                      showarrow: false, font: { color: "#ffc857", size: 11 } };
+
+  const flowRows = Object.entries(groups).map(([k, l]) => trace(k, l.filter((e) => e.airflow_cm_s !== null), "airflow_cm_s"))
+    .filter((t) => t.x.length);
+  Plotly.newPlot("pO2Flow", flowRows, {
+    ...PLOT_LAYOUT, title: { text: "Oxygen vs ventilation airflow", font: { size: 14 } },
+    xaxis: { ...PLOT_LAYOUT.xaxis, type: "linear", title: "O₂ (%)", range: [10, 90] },
+    yaxis: { ...PLOT_LAYOUT.yaxis, type: "linear", title: "Airflow (cm/s)", rangemode: "tozero" },
+    shapes: [moonBand(60)], annotations: [moonLabel],
+  }, PLOT_CONFIG);
+
+  const pressRows = Object.entries(groups).map(([k, l]) => trace(k, l.filter((e) => e.pressure_kpa !== null), "pressure_kpa"))
+    .filter((t) => t.x.length);
+  pressRows.push({
+    type: "scatter", mode: "markers+text", name: "Targets", x: [ISS.o2, MOON.o2], y: [ISS.kpa, MOON.kpa],
+    text: ["ISS", "Moon base"], textposition: "top center", hoverinfo: "text",
+    marker: { symbol: "star", size: 16, color: ["#e6ebf5", "#ffc857"], line: { width: 1, color: "#0b1020" } },
+    textfont: { color: "#ffc857" },
+  });
+  Plotly.newPlot("pO2Press", pressRows, {
+    ...PLOT_LAYOUT, title: { text: "Oxygen vs cabin pressure", font: { size: 14 } },
+    xaxis: { ...PLOT_LAYOUT.xaxis, type: "linear", title: "O₂ (%)", range: [10, 90] },
+    yaxis: { ...PLOT_LAYOUT.yaxis, type: "linear", title: "Pressure (kPa)", rangemode: "tozero" },
+    shapes: [moonBand(350)], annotations: [moonLabel],
+  }, PLOT_CONFIG);
+}
+$("mColor").addEventListener("change", drawMaps);
+$("mAmbient").addEventListener("change", drawMaps);
+
+// ---------- what-if ----------
+const sliders = [["sO2", "vO2", (v) => `${v}% O₂`], ["sP", "vP", (v) => `${v} kPa (${(v * 0.145038).toFixed(1)} psi)`],
+                 ["sF", "vF", (v) => `${v} cm/s`], ["sK", "vK", (v) => `${v} tests`]];
+sliders.forEach(([s, v, fmt]) => { const upd = () => ($(v).textContent = fmt($(s).value)); $(s).addEventListener("input", upd); upd(); });
+
+const PRESETS = {
+  iss: { env: "ISS (Microgravity 0g)", o2: 21, p: 101.3, f: 5 },
+  moon: { env: "Lunar Habitat (0.16g)", o2: 34, p: 70.3, f: 5 },
+  suit: { env: "ISS (Microgravity 0g)", o2: 21, p: 101.3, f: 0 },
+};
+document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+  const p = PRESETS[b.dataset.preset];
+  $("sEnv").value = p.env; $("sO2").value = p.o2; $("sP").value = p.p; $("sF").value = p.f;
+  sliders.forEach(([s]) => $(s).dispatchEvent(new Event("input")));
+  runSim();
+}));
+
+async function runSim() {
+  try {
+    const r = await api("/simulate-risk", {
+      environment: $("sEnv").value, material: $("sMat").value, o2_pct: $("sO2").value,
+      pressure_kpa: $("sP").value, airflow_cm_s: $("sF").value, top_k: $("sK").value,
+    });
+    const a = r.risk_assessment;
+    const levelKey = (a.risk_level || "UNKNOWN").split(" ")[0];
+    $("sLevel").textContent = a.risk_level;
+    $("sLevel").className = `level ${levelKey}`;
+    $("sMethod").textContent = `${a.method}. Evidence: ${a.evidence_tests.length} test(s).`;
+    $("sCool").textContent = a.cool_flame_reignition_risk;
+    $("sCO").textContent = a.estimated_co_spike_ppm !== null ? `${a.estimated_co_spike_ppm} ppm average increase` : "not measured";
+    $("sLim").innerHTML = r.limitations.map((l) => `<li>${esc(l)}</li>`).join("");
+    $("sRecs").innerHTML = r.safety_recommendations.map((l) => `<li>${esc(l)}</li>`).join("") || "<li>No reported outcomes for this scenario.</li>";
+    $("sBody").innerHTML = r.nearest_nasa_experiments.map((e) => `<tr>
+      <td>${cell(e.exp_id)}</td><td>${cell(e.investigation)}</td><td>${cell(e.material)}</td><td>${cell(o2Of(e), 1)}</td>
+      <td>${cell(e.pressure_kpa, 1)}</td><td>${cell(e.airflow_cm_s, 1)}</td><td>${cell(e.outcome)}</td>
+      <td>${cell(e.similarity_score_pct, 0)}%</td></tr>`).join("");
+    $("sBody").querySelectorAll("tr").forEach((tr, i) => tr.addEventListener("click", () => openDrawer(r.nearest_nasa_experiments[i])));
+
+    const score = a.flammability_score;
+    Plotly.newPlot("pGauge", [{
+      type: "indicator", mode: score === null ? "number" : "gauge+number", value: score ?? 0,
+      number: { suffix: score === null ? "" : "%", font: { size: 40 }, valueformat: "d" },
+      title: { text: score === null ? "No reported outcomes" : "Flame established in similar tests", font: { size: 13 } },
+      gauge: { axis: { range: [0, 100], tickcolor: "#8d9abb" }, bar: { color: "#ff7a3d" }, bgcolor: "#18223c",
+               steps: [{ range: [0, 33], color: "rgba(62,207,142,.25)" }, { range: [33, 67], color: "rgba(255,200,87,.25)" },
+                       { range: [67, 100], color: "rgba(255,93,108,.25)" }] },
+    }], { ...PLOT_LAYOUT, margin: { l: 25, r: 25, t: 50, b: 10 } }, PLOT_CONFIG);
+    showError("");
+  } catch (err) { showError(`What-if failed: ${err.message}`); }
+}
+$("sRun").addEventListener("click", runSim);
+
+// ---------- start ----------
+async function connect() {
+  API = $("apiBase").value.trim();
+  storeSet("psiApi", API);
+  try {
+    const h = await api("/health");
+    $("apiDot").classList.add("on");
+    $("apiText").textContent = `${h.total_experiments_loaded} tests loaded`;
+    if (h.files_missing && h.files_missing.length) {
+      showError(`Backend is running but ${h.files_missing.length} PSI table(s) are missing: ${h.files_missing.join(", ")}`);
+    } else showError("");
+    await loadFilters();
+    await Promise.all([loadOverview(), loadTable(), loadMapData()]);
+    runSim();
+  } catch (err) {
+    $("apiDot").classList.remove("on");
+    $("apiText").textContent = "API offline";
+    showError(`Cannot reach the backend at ${API}. Start it with: uvicorn nasa_psi_backend:app --reload --port 8000  (${err.message})`);
+  }
+}
+$("apiBase").value = storeGet("psiApi", "http://localhost:8000");
+$("apiConnect").addEventListener("click", connect);
+connect();
+</script>
+</body>
+</html>
