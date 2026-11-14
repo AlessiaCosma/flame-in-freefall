@@ -90,6 +90,22 @@
   .drawer dd { margin: 0; word-break: break-word; }
   .error { background: rgba(255, 93, 108, .1); border: 1px solid rgba(255, 93, 108, .4); color: #ffb3bb; padding: 12px 14px;
            border-radius: 10px; margin-bottom: 16px; display: none; font-size: 13px; }
+  .chat { display: flex; flex-direction: column; height: 620px; }
+  .msgs { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 4px 12px; }
+  .msg { max-width: 78%; padding: 11px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #2a2f4f; border: 1px solid #3a4170; }
+  .msg.bot { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+  .msg.bot.notice { border-color: rgba(255, 200, 87, .4); }
+  .msg .cite { color: var(--accent-2); cursor: pointer; text-decoration: underline dotted; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel);
+          color: var(--text); cursor: pointer; }
+  .chip:hover { border-color: var(--accent-2); }
+  .composer { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .composer input { flex: 1; font-size: 14px; padding: 11px 12px; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .suggest button { font-size: 12px; }
+  .typing { color: var(--muted); font-size: 13px; font-style: italic; }
   footer { color: var(--muted); font-size: 11px; text-align: center; padding: 20px; border-top: 1px solid var(--border); }
 </style>
 </head>
@@ -114,6 +130,7 @@
   <button data-tab="explorer">Explorer</button>
   <button data-tab="map">Condition map</button>
   <button data-tab="whatif">What-if</button>
+  <button data-tab="ask">Ask AI</button>
 </nav>
 
 <main>
@@ -224,6 +241,28 @@
             <th>ID</th><th>Investigation</th><th>Material</th><th>O₂ %</th><th>kPa</th><th>cm/s</th><th>Outcome</th><th>Similarity</th>
           </tr></thead><tbody id="sBody"></tbody></table></div>
         </div>
+      </div>
+    </div>
+  </section>
+  <!-- ASK AI -->
+  <section id="ask">
+    <h2>Ask the NASA data</h2>
+    <p class="lead">The assistant answers only from the PSI tests in this dashboard and cites them in [brackets] – click a
+      citation or a source chip to open the test. If the data has no answer, it says so.</p>
+    <div class="suggest">
+      <button class="btn ghost" data-q="Which tests are closest to the planned Moon-base atmosphere (30% O2, 70 kPa)?">Moon-base conditions</button>
+      <button class="btn ghost" data-q="How effective were CO2 and helium at extinguishing flames in FLEX?">CO₂ vs helium (FLEX)</button>
+      <button class="btn ghost" data-q="Which solid materials did not burn in SAFFIRE-II, and why does that matter?">Materials that didn't burn</button>
+      <button class="btn ghost" data-q="What do SAME and SAME-R tell us about smoke detection in microgravity?">Smoke detection</button>
+      <button class="btn ghost" data-q="Where are the biggest gaps in the data for lunar fire safety?">Data gaps</button>
+    </div>
+    <div class="card chat">
+      <div class="msgs" id="msgs">
+        <div class="msg bot">Hi! Ask me anything about the NASA microgravity fire tests – materials, oxygen levels, extinguishing agents, smoke detection.</div>
+      </div>
+      <div class="composer">
+        <input id="askInput" placeholder="e.g. Does PMMA keep burning when ventilation stops?" maxlength="1000">
+        <button class="btn" id="askSend">Send</button>
       </div>
     </div>
   </section>
@@ -465,6 +504,56 @@ async function runSim() {
   } catch (err) { showError(`What-if failed: ${err.message}`); }
 }
 $("sRun").addEventListener("click", runSim);
+
+// ---------- ask AI ----------
+const chatHistory = [];
+const sourceIndex = {};
+
+function findTest(id) { return sourceIndex[id] || allExperiments.find((e) => e.exp_id === id); }
+
+function renderAnswer(text) {
+  return esc(text).replace(/\[([A-Za-z0-9_\-]+(?:-[A-Za-z0-9]+)*)\]/g, (m, id) =>
+    findTest(id) ? `<span class="cite" data-id="${id}">[${id}]</span>` : m);
+}
+
+async function ask(question) {
+  question = question.trim();
+  if (!question) return;
+  const box = $("msgs");
+  box.insertAdjacentHTML("beforeend", `<div class="msg user">${esc(question)}</div>`);
+  box.insertAdjacentHTML("beforeend", `<div class="typing" id="typing">Searching the NASA tests…</div>`);
+  box.scrollTop = box.scrollHeight;
+  $("askInput").value = "";
+  $("askSend").disabled = true;
+  try {
+    const res = await fetch(API.replace(/\/$/, "") + "/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history: chatHistory.slice(-6) }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const r = await res.json();
+    r.sources.forEach((s) => (sourceIndex[s.exp_id] = s));
+    const chips = r.sources.slice(0, 12).map((s) =>
+      `<span class="chip" data-id="${esc(s.exp_id)}">${esc(s.exp_id)} · ${esc(s.outcome || "")}</span>`).join("");
+    const more = r.sources.length > 12 ? `<span class="muted">+${r.sources.length - 12} more</span>` : "";
+    box.insertAdjacentHTML("beforeend", `<div class="msg bot ${r.mode === "ai" ? "" : "notice"}">${renderAnswer(r.answer)}
+      ${r.sources.length ? `<div class="chips">${chips}${more}</div>` : ""}</div>`);
+    chatHistory.push({ role: "user", content: question }, { role: "assistant", content: r.answer });
+  } catch (err) {
+    box.insertAdjacentHTML("beforeend", `<div class="msg bot notice">Could not reach the assistant: ${esc(err.message)}</div>`);
+  } finally {
+    $("typing")?.remove();
+    $("askSend").disabled = false;
+    box.scrollTop = box.scrollHeight;
+  }
+}
+$("msgs").addEventListener("click", (ev) => {
+  const id = ev.target.dataset?.id;
+  if (id && findTest(id)) openDrawer(findTest(id));
+});
+$("askSend").addEventListener("click", () => ask($("askInput").value));
+$("askInput").addEventListener("keydown", (ev) => { if (ev.key === "Enter") ask($("askInput").value); });
+document.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.q)));
 
 // ---------- start ----------
 async function connect() {
