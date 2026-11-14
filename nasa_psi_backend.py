@@ -718,6 +718,143 @@ def simulate_habitat_fire_risk(
     }
 
 
+# =====================================================================
+# 5. AI ASSISTANT  (/ask)
+# =====================================================================
+# The assistant only sees (a) a per-investigation summary computed from df_master and (b) the tests retrieved for
+# the question. It must cite exp_ids / investigations and say when PSI has no data.
+# Set the key before starting the server:  ANTHROPIC_API_KEY=...   (never commit it; keep it in .env)
+
+from pydantic import BaseModel
+
+_env_file = os.path.join(BASE_DIR, ".env")  # minimal .env loader: KEY=value lines
+if os.path.exists(_env_file):
+    for _line in open(_env_file, encoding="utf-8"):
+        if "=" in _line and not _line.lstrip().startswith("#"):
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"'))
+
+AI_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+CONTEXT_COLS = ["exp_id", "investigation", "pillar", "material", "geometry", "o2_pct", "o2_min_pct", "o2_max_pct",
+                "o2_context", "pressure_kpa", "airflow_cm_s", "diluent", "suppressant_pct", "burn_time_s",
+                "outcome", "data_notes"]
+SYSTEM_PROMPT = """You are the fire-safety data assistant of "Flame in Freefall", a dashboard built on NASA's
+Physical Sciences Informatics (PSI) microgravity combustion data.
+
+Rules:
+1. Answer ONLY from the DATA block below. If the data does not contain the answer, say so plainly.
+2. Cite evidence: investigation names (e.g. BASS-II, FLEX) and test IDs in square brackets, e.g. [FLEX-20].
+3. Never invent numbers. "n/r" means NASA did not report the value - do not fill it in.
+4. PSI has no partial-gravity (Moon/Mars) combustion data; for lunar or Martian questions say that microgravity
+   and 1g results only bound the answer. The planned Moon base atmosphere is >=30% O2 at <=10.2 psi (~70 kPa).
+5. Be concise: a short answer first, then up to 5 bullet points of evidence. Answer in the user's language.
+6. Inverse-flame O2 values (o2_context = burner stream) are not cabin atmosphere O2."""
+
+KEYWORDS = {
+    "pmma": "PMMA", "acrylic": "PMMA", "plexi": "PMMA", "sibal": "SIBAL", "cotton": "SIBAL", "fabric": "SIBAL",
+    "nomex": "Nomex", "silicon": "Silicone", "methanol": "Methanol", "heptane": "Heptane", "ethylene": "Ethylene",
+    "methane": "Methane", "propane": "Propane", "butane": "Butane", "hydrogen": "Hydrogen", "kapton": "Kapton",
+    "teflon": "Teflon", "wax": "Wax", "candle": "Wax", "octane": "Octane", "decane": "Decane", "ethanol": "Ethanol",
+}
+TOPICS = {
+    "smoke": "Detection", "detect": "Detection", "fum": "Detection", "detec": "Detection",
+    "extingu": "Suppression", "suppress": "Suppression", "stinge": "Suppression", "co2": "Suppression",
+    "helium": "Suppression", "material": "Prevention", "flammab": "Prevention", "inflamab": "Prevention",
+    "spread": "Prevention", "propag": "Prevention",
+}
+
+
+class AskRequest(BaseModel):
+    question: str
+    history: list = []
+
+
+def investigation_summary() -> str:
+    lines = []
+    for inv, g in df_master.groupby("investigation"):
+        o2 = g["o2_pct"].fillna(g["o2_max_pct"]).dropna()
+        p = g["pressure_kpa"].dropna()
+        lines.append(
+            f"- {inv} ({g['dataset_id'].iloc[0]}, DOI {g['doi'].iloc[0]}, pillar {g['pillar'].iloc[0]}): {len(g)} tests; "
+            f"O2 {f'{o2.min():.0f}-{o2.max():.0f}%' if len(o2) else 'n/r'}; "
+            f"pressure {f'{p.min():.0f}-{p.max():.0f} kPa' if len(p) else 'n/r'}; "
+            f"materials {', '.join(g['material'].value_counts().head(5).index)}; "
+            f"outcomes {', '.join(f'{k}: {int(v)}' for k, v in g['outcome'].value_counts().head(5).items())}")
+    return "\n".join(lines)
+
+
+def retrieve(question: str, k: int = 40) -> pd.DataFrame:
+    """Scores each test by how well it matches the question: names, materials, topics, O2 / pressure values."""
+    q = question.lower()
+    score = pd.Series(0.0, index=df_master.index)
+    for inv in df_master["investigation"].unique():
+        short = inv.split("/")[-1].strip().lower()
+        if re.search(r"\b" + re.escape(short) + r"\b", q):
+            score += (df_master["investigation"] == inv) * 5
+    for key, mat in KEYWORDS.items():
+        if key in q:
+            score += mat_match(df_master["material"], mat) * 4
+    for key, pillar in TOPICS.items():
+        if key in q:
+            score += df_master["pillar"].fillna("").str.startswith(pillar) * 2
+    if any(w in q for w in ["high oxygen", "high o2", "oxygen-rich", "oxigen ridicat", "mult oxigen", "enriched"]):
+        score += (df_master["o2_max_pct"] >= 30).astype(float) * 3
+    if any(w in q for w in ["moon", "lun", "mars", "marte"]):
+        score += df_master["moon_base_relevant"].astype(float) * 3
+    for value in [float(v) for v in re.findall(r"(\d+(?:\.\d+)?)\s*%", q)]:
+        o2 = df_master["o2_pct"].fillna(df_master["o2_max_pct"])
+        score += ((o2 - value).abs() <= 3).astype(float) * 3
+    score += df_master["outcome"].ne("Not reported").astype(float) * 0.5  # prefer tests with a reported outcome
+    ranked = df_master.assign(_score=score).sort_values("_score", ascending=False)
+    hits = ranked[ranked["_score"] > 0.5]
+    picked = hits.groupby("investigation", group_keys=False).head(12)  # keep several investigations represented
+    return picked.sort_values("_score", ascending=False).head(k)
+
+
+def rows_as_text(rows: pd.DataFrame) -> str:
+    def fmt(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return "n/r"
+        return f"{v:g}" if isinstance(v, float) else str(v)
+    return "\n".join(" | ".join(f"{c}={fmt(r[c])}" for c in CONTEXT_COLS) for _, r in rows.iterrows())
+
+
+def ask_claude(system: str, messages: list) -> str:
+    import anthropic  # imported here so the rest of the API works without the package
+    client = anthropic.Anthropic()
+    resp = client.messages.create(model=AI_MODEL, max_tokens=1200, system=system, messages=messages)
+    return "".join(block.text for block in resp.content if getattr(block, "type", "") == "text").strip()
+
+
+@app.post("/ask")
+def ask_assistant(req: AskRequest):
+    question = req.question.strip()[:1000]
+    if not question:
+        return {"answer": "Please type a question.", "sources": [], "mode": "empty"}
+    rows = retrieve(question)
+    sources = to_records(rows.drop(columns="_score"))
+    data_block = (f"DATA\n## Investigations\n{investigation_summary()}\n\n"
+                  f"## Tests retrieved for this question ({len(rows)})\n{rows_as_text(rows) or 'none'}")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        found = ", ".join(sorted(rows["investigation"].unique())) or "none"
+        return {
+            "answer": "AI is not configured (ANTHROPIC_API_KEY is not set), so here are the NASA tests that match "
+                      f"your question instead. Investigations: {found}.",
+            "sources": sources, "mode": "data-only",
+        }
+
+    history = [m for m in req.history[-6:] if m.get("role") in ("user", "assistant") and m.get("content")]
+    messages = [{"role": m["role"], "content": str(m["content"])[:2000]} for m in history]
+    messages.append({"role": "user", "content": f"{data_block}\n\nQUESTION: {question}"})
+    try:
+        answer = ask_claude(SYSTEM_PROMPT, messages)
+    except Exception as err:  # network / key / quota problems must not crash the dashboard
+        return {"answer": f"The AI service failed ({type(err).__name__}). Matching NASA tests are listed below.",
+                "sources": sources, "mode": "error"}
+    return {"answer": answer, "sources": sources, "mode": "ai", "model": AI_MODEL}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
