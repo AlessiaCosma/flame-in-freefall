@@ -1,0 +1,74 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="LanguageDetectionInspection" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="aiohttp" />
+          <option value="astor" />
+          <option value="async_generator" />
+          <option value="BeautifulSoup" />
+          <option value="black" />
+          <option value="brotli" />
+          <option value="brotlicffi" />
+          <option value="cchardet" />
+          <option value="chardet" />
+          <option value="click" />
+          <option value="ConfigParser" />
+          <option value="cryptography" />
+          <option value="curio" />
+          <option value="cython" />
+          <option value="docutils" />
+          <option value="docx2txt" />
+          <option value="exceptiongroup" />
+          <option value="filelock" />
+          <option value="h2" />
+          <option value="html5lib" />
+          <option value="HTMLParser" />
+          <option value="hypothesis" />
+          <option value="ipython" />
+          <option value="ipywidgets" />
+          <option value="isort" />
+          <option value="jedi" />
+          <option value="jnius" />
+          <option value="js" />
+          <option value="keyring" />
+          <option value="lxml_html_clean" />
+          <option value="mypy" />
+          <option value="openai" />
+          <option value="pylint" />
+          <option value="pyodide" />
+          <option value="pyOpenSSL" />
+          <option value="pypdf" />
+          <option value="pyright" />
+          <option value="pytest" />
+          <option value="python_socks" />
+          <option value="pytz" />
+          <option value="PyYAML" />
+          <option value="redis" />
+          <option value="requests_oauthlib" />
+          <option value="ruff" />
+          <option value="setuptools" />
+          <option value="simplejson" />
+          <option value="Sphinx" />
+          <option value="thread" />
+          <option value="trustme" />
+          <option value="urllib3_secure_extra" />
+          <option value="websockets" />
+          <option value="win_inet_pton" />
+          <option value="wsaccel" />
+          <option value="xmlrpclib" />
+          <option value="yarl" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyStubPackagesAdvertiser" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="scipy" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
