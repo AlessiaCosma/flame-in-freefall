@@ -719,36 +719,37 @@ def simulate_habitat_fire_risk(
 
 
 # =====================================================================
-# 5. AI ASSISTANT  (/ask)
+# 5. AI ASSISTANT (/ask) + WEB SERVER
 # =====================================================================
-# The assistant only sees (a) a per-investigation summary computed from df_master and (b) the tests retrieved for
-# the question. It must cite exp_ids / investigations and say when PSI has no data.
-# Set the key before starting the server:  ANTHROPIC_API_KEY=...   (never commit it; keep it in .env)
 
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-_env_file = os.path.join(BASE_DIR, ".env")  # minimal .env loader: KEY=value lines
+_env_file = os.path.join(BASE_DIR, ".env")
 if os.path.exists(_env_file):
     for _line in open(_env_file, encoding="utf-8"):
         if "=" in _line and not _line.lstrip().startswith("#"):
             _k, _v = _line.split("=", 1)
-            os.environ.setdefault(_k.strip(), _v.strip().strip('"'))
+            os.environ[_k.strip()] = _v.strip().strip('"').strip("'")
 
-AI_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
-CONTEXT_COLS = ["exp_id", "investigation", "pillar", "material", "geometry", "o2_pct", "o2_min_pct", "o2_max_pct",
-                "o2_context", "pressure_kpa", "airflow_cm_s", "diluent", "suppressant_pct", "burn_time_s",
-                "outcome", "data_notes"]
-SYSTEM_PROMPT = """You are the fire-safety data assistant of "Flame in Freefall", a dashboard built on NASA's
-Physical Sciences Informatics (PSI) microgravity combustion data.
+CONTEXT_COLS = [
+    "exp_id", "investigation", "pillar", "material", "geometry", "o2_pct", "o2_min_pct", "o2_max_pct",
+    "o2_context", "pressure_kpa", "airflow_cm_s", "diluent", "suppressant_pct", "burn_time_s",
+    "outcome", "data_notes",
+]
 
-Rules:
-1. Answer ONLY from the DATA block below. If the data does not contain the answer, say so plainly.
-2. Cite evidence: investigation names (e.g. BASS-II, FLEX) and test IDs in square brackets, e.g. [FLEX-20].
-3. Never invent numbers. "n/r" means NASA did not report the value - do not fill it in.
-4. PSI has no partial-gravity (Moon/Mars) combustion data; for lunar or Martian questions say that microgravity
-   and 1g results only bound the answer. The planned Moon base atmosphere is >=30% O2 at <=10.2 psi (~70 kPa).
-5. Be concise: a short answer first, then up to 5 bullet points of evidence. Answer in the user's language.
-6. Inverse-flame O2 values (o2_context = burner stream) are not cabin atmosphere O2."""
+SYSTEM_PROMPT = """You are the Super Intelligence (SI) fire-safety assistant for "Flame in Freefall" (NASA Space Apps Challenge 2026), built on NASA's Physical Sciences Informatics (PSI) database (1,021 experiments across 15 investigations).
+
+Project knowledge:
+- Purpose: Summarize, rank, and interpret NASA microgravity combustion data for ISS, lunar bases (>=30% O2 at <=10.2 psi / 70.3 kPa), Mars, and Earth spin-offs (water-mist extinguishers, smoke detectors).
+- Microgravity physics: No buoyancy (hot gases don't rise); flames form spheres driven by diffusion and ventilation airflow.
+- 4 Pillars: Prevention (BASS, BASS-II, SAFFIRE I-III, ACME BRE), Detection (SAME, SAME-R smoke studies), Suppression (FLEX, FLEX-2 with CO2/He), Fundamental (ACME CFI-G, Flame Design, CLD, s-Flame, E-FIELD). PSI has no partial-gravity data yet (LUCI and FM2 pending).
+
+Strict formatting rules:
+1. Keep every response SHORT and punchy: maximum 80-110 words total!
+2. Give a 1-2 sentence direct answer, followed by at most 3 short bullet points (- ).
+3. Do NOT use Markdown bold asterisks (**text**) because the chat box renders plain text.
+4. Cite specific tests in square brackets like [FLEX-20] or [SAFFIRE2-2-1] and never invent numbers ("n/r" = not reported). Answer in the user's language."""
 
 KEYWORDS = {
     "pmma": "PMMA", "acrylic": "PMMA", "plexi": "PMMA", "sibal": "SIBAL", "cotton": "SIBAL", "fabric": "SIBAL",
@@ -779,12 +780,12 @@ def investigation_summary() -> str:
             f"O2 {f'{o2.min():.0f}-{o2.max():.0f}%' if len(o2) else 'n/r'}; "
             f"pressure {f'{p.min():.0f}-{p.max():.0f} kPa' if len(p) else 'n/r'}; "
             f"materials {', '.join(g['material'].value_counts().head(5).index)}; "
-            f"outcomes {', '.join(f'{k}: {int(v)}' for k, v in g['outcome'].value_counts().head(5).items())}")
+            f"outcomes {', '.join(f'{k}: {int(v)}' for k, v in g['outcome'].value_counts().head(5).items())}"
+        )
     return "\n".join(lines)
 
 
-def retrieve(question: str, k: int = 40) -> pd.DataFrame:
-    """Scores each test by how well it matches the question: names, materials, topics, O2 / pressure values."""
+def retrieve(question: str, k: int = 25) -> pd.DataFrame:
     q = question.lower()
     score = pd.Series(0.0, index=df_master.index)
     for inv in df_master["investigation"].unique():
@@ -799,15 +800,17 @@ def retrieve(question: str, k: int = 40) -> pd.DataFrame:
             score += df_master["pillar"].fillna("").str.startswith(pillar) * 2
     if any(w in q for w in ["high oxygen", "high o2", "oxygen-rich", "oxigen ridicat", "mult oxigen", "enriched"]):
         score += (df_master["o2_max_pct"] >= 30).astype(float) * 3
-    if any(w in q for w in ["moon", "lun", "mars", "marte"]):
+    if any(w in q for w in ["moon", "lun", "mars", "marte", "gap"]):
         score += df_master["moon_base_relevant"].astype(float) * 3
     for value in [float(v) for v in re.findall(r"(\d+(?:\.\d+)?)\s*%", q)]:
         o2 = df_master["o2_pct"].fillna(df_master["o2_max_pct"])
         score += ((o2 - value).abs() <= 3).astype(float) * 3
-    score += df_master["outcome"].ne("Not reported").astype(float) * 0.5  # prefer tests with a reported outcome
+    score += df_master["outcome"].ne("Not reported").astype(float) * 0.5
     ranked = df_master.assign(_score=score).sort_values("_score", ascending=False)
     hits = ranked[ranked["_score"] > 0.5]
-    picked = hits.groupby("investigation", group_keys=False).head(12)  # keep several investigations represented
+    if hits.empty:
+        hits = ranked
+    picked = hits.groupby("investigation", group_keys=False).head(8)
     return picked.sort_values("_score", ascending=False).head(k)
 
 
@@ -819,11 +822,31 @@ def rows_as_text(rows: pd.DataFrame) -> str:
     return "\n".join(" | ".join(f"{c}={fmt(r[c])}" for c in CONTEXT_COLS) for _, r in rows.iterrows())
 
 
-def ask_claude(system: str, messages: list) -> str:
-    import anthropic  # imported here so the rest of the API works without the package
-    client = anthropic.Anthropic()
-    resp = client.messages.create(model=AI_MODEL, max_tokens=1200, system=system, messages=messages)
-    return "".join(block.text for block in resp.content if getattr(block, "type", "") == "text").strip()
+def ask_gemini(system: str, history: list, data_block: str, question: str) -> tuple[str, str]:
+    from google import genai
+    from google.genai import types
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=20000))
+
+    hist_text = ""
+    if history:
+        hist_lines = [f"{m['role'].upper()}: {str(m['content'])[:500]}" for m in history[-4:]]
+        hist_text = "CONVERSATION HISTORY:\n" + "\n".join(hist_lines) + "\n\n"
+
+    full_prompt = f"{system}\n\n{data_block}\n\n{hist_text}USER QUESTION: {question}"
+
+    for model_name in ["gemini-3.5-flash", "gemini-2.5-flash"]:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=full_prompt,
+            )
+            if resp and resp.text:
+                print(f"[SI OK] Answered with {model_name}")
+                return resp.text.replace("**", "").strip(), model_name
+        except Exception as err:
+            print(f"[SI Info] {model_name} failed ({err}), trying next...")
 
 
 @app.post("/ask")
@@ -833,26 +856,28 @@ def ask_assistant(req: AskRequest):
         return {"answer": "Please type a question.", "sources": [], "mode": "empty"}
     rows = retrieve(question)
     sources = to_records(rows.drop(columns="_score"))
-    data_block = (f"DATA\n## Investigations\n{investigation_summary()}\n\n"
-                  f"## Tests retrieved for this question ({len(rows)})\n{rows_as_text(rows) or 'none'}")
-
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        found = ", ".join(sorted(rows["investigation"].unique())) or "none"
-        return {
-            "answer": "AI is not configured (ANTHROPIC_API_KEY is not set), so here are the NASA tests that match "
-                      f"your question instead. Investigations: {found}.",
-            "sources": sources, "mode": "data-only",
-        }
+    data_block = (
+        f"DATA\n## Investigations Summary\n{investigation_summary()}\n\n"
+        f"## Relevant NASA PSI Tests ({len(rows.head(15))})\n{rows_as_text(rows.head(15))}"
+    )
 
     history = [m for m in req.history[-6:] if m.get("role") in ("user", "assistant") and m.get("content")]
-    messages = [{"role": m["role"], "content": str(m["content"])[:2000]} for m in history]
-    messages.append({"role": "user", "content": f"{data_block}\n\nQUESTION: {question}"})
     try:
-        answer = ask_claude(SYSTEM_PROMPT, messages)
-    except Exception as err:  # network / key / quota problems must not crash the dashboard
-        return {"answer": f"The AI service failed ({type(err).__name__}). Matching NASA tests are listed below.",
-                "sources": sources, "mode": "error"}
-    return {"answer": answer, "sources": sources, "mode": "ai", "model": AI_MODEL}
+        answer, used_model = ask_gemini(SYSTEM_PROMPT, history, data_block, question)
+        return {"answer": answer, "sources": sources, "mode": "ai", "model": used_model}
+    except Exception as err:
+        return {
+            "answer": f"Gemini API error: {err}",
+            "sources": sources,
+            "mode": "error",
+        }
+
+
+@app.get("/")
+@app.get("/index.html")
+@app.get("/Hackathon")
+def serve_dashboard():
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
 
 
 if __name__ == "__main__":
